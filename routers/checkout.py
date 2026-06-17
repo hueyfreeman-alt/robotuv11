@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router
 from aiogram.types import CallbackQuery
 
@@ -7,6 +9,8 @@ from services.product_service import decrease_stock
 from services.payment_service import create_payment
 from services.delivery_service import deliver_by_product_ids
 from ui.keyboards import back_to_menu
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -26,21 +30,78 @@ async def checkout(callback: CallbackQuery):
 
     total = sum(price * qty for _, price, qty in items)
 
-    order_id = create_order(user_id, total, "mixed")
+    # Step 1: Create order
+    try:
+        order_id = create_order(user_id, total, "mixed")
+    except Exception as e:
+        logger.error("Checkout failed at order creation for user %d: %s", user_id, e)
+        await callback.message.answer("❌ Checkout failed. Please try again.")
+        await callback.answer()
+        return
 
+    # Step 2: Add order items
     raw = get_cart_raw(user_id)
-    add_order_items(order_id, raw)
+    if not raw:
+        logger.error("Cart raw data empty during checkout for user %d", user_id)
+        await callback.message.answer("❌ Checkout failed — cart data unavailable.")
+        await callback.answer()
+        return
 
+    try:
+        add_order_items(order_id, raw)
+    except Exception as e:
+        logger.error(
+            "Checkout failed at adding order items for order %d: %s", order_id, e
+        )
+        await callback.message.answer("❌ Checkout failed while processing items.")
+        await callback.answer()
+        return
+
+    # Step 3: Decrease stock
     product_ids = []
-    for pid, qty in raw:
-        decrease_stock(pid, qty)
-        product_ids.append(pid)
+    try:
+        for pid, qty in raw:
+            decrease_stock(pid, qty)
+            product_ids.append(pid)
+    except Exception as e:
+        logger.error(
+            "Checkout failed at stock decrease for order %d: %s", order_id, e
+        )
+        await callback.message.answer(
+            "❌ Some items are out of stock. Order could not be completed."
+        )
+        await callback.answer()
+        return
 
-    create_payment(order_id, total)
-    clear_cart(user_id)
+    # Step 4: Create payment record
+    try:
+        create_payment(order_id, total)
+    except Exception as e:
+        logger.error(
+            "Checkout: payment creation failed for order %d: %s", order_id, e
+        )
+        await callback.message.answer(
+            f"⚠️ Order #{order_id} created but payment recording failed. "
+            "Please contact support."
+        )
+        await callback.answer()
+        return
 
-    # Deliver digital content
-    await deliver_by_product_ids(callback.bot, user_id, product_ids)
+    # Step 5: Clear cart
+    try:
+        clear_cart(user_id)
+    except Exception as e:
+        logger.error("Failed to clear cart after checkout for user %d: %s", user_id, e)
+        # Non-fatal: order is already placed
+
+    # Step 6: Deliver digital content
+    try:
+        await deliver_by_product_ids(callback.bot, user_id, product_ids)
+    except Exception as e:
+        logger.error(
+            "Failed to deliver digital content for order %d: %s", order_id, e
+        )
+        # Non-fatal: order is placed, just log it
 
     await callback.message.answer(
         f"<b>Order #{order_id} confirmed</b>\n"
