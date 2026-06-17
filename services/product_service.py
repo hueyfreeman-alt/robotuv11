@@ -56,10 +56,15 @@ def add_product(name, description, price, stock, category, ptype):
     return product_id
 
 
+ALLOWED_PRODUCT_FIELDS = {"name", "description", "price", "stock", "category", "type"}
+
+
 def update_product(product_id, **kwargs):
     conn = get_conn()
     cur = conn.cursor()
     for key, value in kwargs.items():
+        if key not in ALLOWED_PRODUCT_FIELDS:
+            continue
         cur.execute(f"UPDATE products SET {key} = ? WHERE id = ?", (value, product_id))
     conn.commit()
     conn.close()

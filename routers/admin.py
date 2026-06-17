@@ -675,6 +675,9 @@ async def broadcast_send(message: Message, state: FSMContext):
 
 # --- Order Status (legacy command support) ---
 
+ALLOWED_ORDER_STATUSES = {"pending", "paid", "shipped", "delivered", "cancelled"}
+
+
 @router.message(lambda m: m.text and m.text.startswith("/set"))
 async def set_status(message: Message):
     if not is_admin(message.from_user.id):
@@ -682,7 +685,16 @@ async def set_status(message: Message):
 
     try:
         _, order_id, status = message.text.split("|")
-        update_order_status(int(order_id.strip()), status.strip())
+        order_id = int(order_id.strip())
+        status = status.strip()
+
+        if status not in ALLOWED_ORDER_STATUSES:
+            await message.answer(
+                f"Invalid status. Allowed: {', '.join(sorted(ALLOWED_ORDER_STATUSES))}"
+            )
+            return
+
+        update_order_status(order_id, status)
         await message.answer(f"Order {order_id} → {status}")
     except (ValueError, TypeError):
         await message.answer("Format: /set|id|status")
