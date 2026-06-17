@@ -1,688 +1,333 @@
 from aiogram import Router
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from config import ADMIN_ID
-from ui.keyboards import (
-    admin_menu,
-    vendor_product_actions,
-    delivery_type_keyboard,
-    broadcast_type_keyboard,
-)
-from services.product_service import (
-    get_all_products,
-    get_product,
-    add_product,
-    update_product,
-    delete_product,
-)
-from services.delivery_service import (
-    get_delivery_items,
-    add_delivery_item,
-    clear_delivery_items,
+from services.vendor_service import (
+    create_city, get_all_cities, delete_city, get_all_vendors, get_pending_withdrawals, update_withdrawal_status,
 )
 from services.settings_service import get_setting, set_setting
 from services.user_service import get_all_users, get_user_count
 from services.broadcast_service import save_broadcast
-from services.order_service import update_order_status
+from ui.keyboards import admin_menu, broadcast_type_keyboard, back_to_menu
 
 router = Router()
 
 
-# --- FSM States ---
-
-class AddProduct(StatesGroup):
+class AdminCity(StatesGroup):
     name = State()
-    description = State()
-    price = State()
-    stock = State()
-    category = State()
-
-
-class EditProduct(StatesGroup):
-    field = State()
-    value = State()
-
-
-class DeliveryAdd(StatesGroup):
-    content = State()
 
 
 class PromoMedia(StatesGroup):
-    waiting_media = State()
+    media = State()
 
 
 class BroadcastState(StatesGroup):
-    waiting_media = State()
+    media = State()
+    caption = State()
 
 
-# --- Admin access check ---
-
-def is_admin(user_id: int) -> bool:
-    return user_id == ADMIN_ID
+def is_admin(telegram_id):
+    return telegram_id == ADMIN_ID
 
 
-# --- Admin Panel Entry ---
-
-@router.message(lambda m: m.text and m.text == "/admin")
-async def admin_panel(message: Message):
+@router.message(Command("admin"))
+async def admin_cmd(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer("Admin Panel", reply_markup=admin_menu())
+    await message.answer("<b>Admin Panel</b>", parse_mode="HTML", reply_markup=admin_menu())
 
 
 @router.callback_query(lambda c: c.data == "admin_panel")
-async def admin_panel_cb(callback: CallbackQuery, state: FSMContext):
+async def admin_panel(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
-    await state.clear()
-    await callback.message.edit_text("Admin Panel", reply_markup=admin_menu())
+    await callback.message.edit_text("<b>Admin Panel</b>", parse_mode="HTML", reply_markup=admin_menu())
     await callback.answer()
 
 
-# --- Stats ---
+# --- Cities ---
 
-@router.callback_query(lambda c: c.data == "adm_stats")
-async def stats(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    user_count = get_user_count()
-    products = get_all_products()
-    await callback.message.edit_text(
-        f"<b>Stats</b>\n\n"
-        f"Users: {user_count}\n"
-        f"Products: {len(products)}",
-        parse_mode="HTML",
-        reply_markup=admin_menu(),
-    )
-    await callback.answer()
-
-
-# --- Product Management ---
-
-@router.callback_query(lambda c: c.data == "adm_products")
-async def list_products(callback: CallbackQuery):
+@router.callback_query(lambda c: c.data == "adm_cities")
+async def adm_cities(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
 
-    products = get_all_products()
-    if not products:
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Add Product", callback_data="adm_addprod")],
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="admin_panel")],
+    cities = get_all_cities()
+    buttons = []
+    for city_id, name, _ in cities:
+        buttons.append([
+            InlineKeyboardButton(text=f"🏙 {name}", callback_data=f"adm_city_{city_id}"),
+            InlineKeyboardButton(text="❌", callback_data=f"adm_delcity_{city_id}"),
         ])
-        await callback.message.edit_text("No products yet.", reply_markup=kb)
-        await callback.answer()
-        return
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-    buttons = []
-    for p in products:
-        pid, name, price, stock, category, ptype = p
-        buttons.append([InlineKeyboardButton(
-            text=f"{name} — {price}$ (stock: {stock})",
-            callback_data=f"vprod_{pid}",
-        )])
-    buttons.append([InlineKeyboardButton(text="➕ Add Product", callback_data="adm_addprod")])
+    buttons.append([InlineKeyboardButton(text="➕ Add City", callback_data="adm_addcity")])
     buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="admin_panel")])
 
     await callback.message.edit_text(
-        "<b>Products</b>",
+        "<b>Cities</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("vprod_"))
-async def view_product(callback: CallbackQuery):
+@router.callback_query(lambda c: c.data == "adm_addcity")
+async def adm_add_city(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
         return
+    await state.set_state(AdminCity.name)
+    await callback.message.edit_text("Enter city name:")
+    await callback.answer()
 
-    product_id = int(callback.data.split("_")[1])
-    p = get_product(product_id)
-    if not p:
-        await callback.answer("Product not found")
+
+@router.message(AdminCity.name)
+async def adm_city_name(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
         return
+    try:
+        create_city(message.text)
+        await message.answer(f"City '{message.text}' created.", reply_markup=back_to_menu())
+    except Exception:
+        await message.answer("City already exists or invalid name.", reply_markup=back_to_menu())
+    await state.clear()
 
-    pid, name, description, price, stock, category, ptype = p
-    delivery_items = get_delivery_items(pid)
 
-    delivery_text = ""
-    if delivery_items:
-        delivery_text = "\n\n<b>Delivery items:</b>\n"
-        for dtype, content, file_id in delivery_items:
-            label = content[:30] if content else (file_id[:20] if file_id else "—")
-            delivery_text += f"  • [{dtype}] {label}\n"
-
-    text = (
-        f"<b>{name}</b>\n"
-        f"Description: {description or '—'}\n"
-        f"Price: {price}$\n"
-        f"Stock: {stock}\n"
-        f"Category: {category}\n"
-        f"Type: {ptype}"
-        f"{delivery_text}"
-    )
-
+@router.callback_query(lambda c: c.data.startswith("adm_delcity_"))
+async def adm_del_city(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    city_id = int(callback.data.split("_")[2])
+    delete_city(city_id)
+    await callback.answer("City removed")
+    # Refresh
+    cities = get_all_cities()
+    buttons = []
+    for cid, name, _ in cities:
+        buttons.append([
+            InlineKeyboardButton(text=f"🏙 {name}", callback_data=f"adm_city_{cid}"),
+            InlineKeyboardButton(text="❌", callback_data=f"adm_delcity_{cid}"),
+        ])
+    buttons.append([InlineKeyboardButton(text="➕ Add City", callback_data="adm_addcity")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="admin_panel")])
     await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=vendor_product_actions(pid),
-    )
-    await callback.answer()
-
-
-# --- Add Product ---
-
-@router.callback_query(lambda c: c.data == "adm_addprod")
-async def add_product_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    await state.set_state(AddProduct.name)
-    await callback.message.edit_text("Enter product name:")
-    await callback.answer()
-
-
-@router.message(AddProduct.name)
-async def add_product_name(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    await state.update_data(name=message.text)
-    await state.set_state(AddProduct.description)
-    await message.answer("Enter description (or send '-' to skip):")
-
-
-@router.message(AddProduct.description)
-async def add_product_desc(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    desc = "" if message.text == "-" else message.text
-    await state.update_data(description=desc)
-    await state.set_state(AddProduct.price)
-    await message.answer("Enter price:")
-
-
-@router.message(AddProduct.price)
-async def add_product_price(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    try:
-        price = float(message.text)
-    except ValueError:
-        await message.answer("Invalid price. Enter a number:")
-        return
-    await state.update_data(price=price)
-    await state.set_state(AddProduct.stock)
-    await message.answer("Enter stock quantity:")
-
-
-@router.message(AddProduct.stock)
-async def add_product_stock(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    try:
-        stock = int(message.text)
-    except ValueError:
-        await message.answer("Invalid number. Enter stock quantity:")
-        return
-    await state.update_data(stock=stock)
-    await state.set_state(AddProduct.category)
-    await message.answer("Enter category:")
-
-
-@router.message(AddProduct.category)
-async def add_product_category(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    data = await state.get_data()
-    product_id = add_product(
-        name=data["name"],
-        description=data["description"],
-        price=data["price"],
-        stock=data["stock"],
-        category=message.text,
-        ptype="digital",
-    )
-    await state.clear()
-    await message.answer(
-        f"Product #{product_id} created.\n\nAdd delivery items now:",
-        reply_markup=delivery_type_keyboard(product_id),
+        "<b>Cities</b>", parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
 
 
-# --- Edit Product ---
+# --- Vendors ---
 
-@router.callback_query(lambda c: c.data.startswith("vedit_"))
-async def edit_product_start(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(lambda c: c.data == "adm_vendors")
+async def adm_vendors(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
 
-    product_id = int(callback.data.split("_")[1])
-    await state.update_data(edit_product_id=product_id)
-    await state.set_state(EditProduct.field)
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Name", callback_data="efield_name")],
-        [InlineKeyboardButton(text="Description", callback_data="efield_description")],
-        [InlineKeyboardButton(text="Price", callback_data="efield_price")],
-        [InlineKeyboardButton(text="Stock", callback_data="efield_stock")],
-        [InlineKeyboardButton(text="Category", callback_data="efield_category")],
-        [InlineKeyboardButton(text="⬅️ Cancel", callback_data=f"vprod_{product_id}")],
-    ])
-    await callback.message.edit_text("Select field to edit:", reply_markup=kb)
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data.startswith("efield_"))
-async def edit_field_selected(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    field = callback.data.split("_", 1)[1]
-    await state.update_data(edit_field=field)
-    await state.set_state(EditProduct.value)
-    await callback.message.edit_text(f"Enter new value for {field}:")
-    await callback.answer()
-
-
-@router.message(EditProduct.value)
-async def edit_product_value(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    data = await state.get_data()
-    product_id = data["edit_product_id"]
-    field = data["edit_field"]
-    value = message.text
-
-    if field == "price":
-        try:
-            value = float(value)
-        except ValueError:
-            await message.answer("Invalid price.")
-            return
-    elif field == "stock":
-        try:
-            value = int(value)
-        except ValueError:
-            await message.answer("Invalid number.")
-            return
-
-    update_product(product_id, **{field: value})
-    await state.clear()
-    await message.answer(f"Updated {field}.", reply_markup=vendor_product_actions(product_id))
-
-
-# --- Delete Product ---
-
-@router.callback_query(lambda c: c.data.startswith("vdel_"))
-async def delete_prod(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    product_id = int(callback.data.split("_")[1])
-    delete_product(product_id)
-    await callback.message.edit_text("Product deleted.", reply_markup=admin_menu())
-    await callback.answer()
-
-
-# --- Delivery Management ---
-
-@router.callback_query(lambda c: c.data == "adm_delivery")
-async def delivery_menu(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-
-    products = get_all_products()
-    if not products:
-        await callback.message.edit_text("No products. Add products first.", reply_markup=admin_menu())
+    vendors = get_all_vendors()
+    if not vendors:
+        await callback.message.edit_text("No vendors.", reply_markup=admin_menu())
         await callback.answer()
         return
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
     buttons = []
-    for p in products:
-        pid, name, price, stock, category, ptype = p
-        items = get_delivery_items(pid)
-        count = len(items)
+    for v in vendors:
+        vid, tid, city_id, shop_name, _, is_active, wallet = v
+        status = "✅" if is_active else "❌"
         buttons.append([InlineKeyboardButton(
-            text=f"{name} ({count} items)",
-            callback_data=f"vdeliv_{pid}",
+            text=f"{status} {shop_name} (wallet: {wallet:.2f}$)",
+            callback_data=f"adm_vendor_{vid}",
         )])
     buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="admin_panel")])
 
     await callback.message.edit_text(
-        "<b>Delivery Management</b>\nSelect a product:",
+        "<b>Vendors</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("vdeliv_"))
-async def view_delivery(callback: CallbackQuery):
+# --- Withdrawals ---
+
+@router.callback_query(lambda c: c.data == "adm_withdrawals")
+async def adm_withdrawals(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
 
-    product_id = int(callback.data.split("_")[1])
-    items = get_delivery_items(product_id)
-    p = get_product(product_id)
-    name = p[1] if p else "Unknown"
-
-    if not items:
-        text = f"<b>{name}</b>\n\nNo delivery items configured."
-    else:
-        text = f"<b>{name}</b>\n\n<b>Delivery items:</b>\n"
-        for dtype, content, file_id in items:
-            label = content[:40] if content else (file_id[:20] if file_id else "—")
-            text += f"  • [{dtype}] {label}\n"
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add Item", callback_data=f"dadd_menu_{product_id}")],
-        [InlineKeyboardButton(text="🗑 Clear All", callback_data=f"dclear_{product_id}")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data=f"vprod_{product_id}")],
-    ])
-
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data.startswith("dadd_menu_"))
-async def delivery_add_menu(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    product_id = int(callback.data.split("_")[2])
-    await callback.message.edit_text(
-        "Select delivery type:",
-        reply_markup=delivery_type_keyboard(product_id),
-    )
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data.startswith("dadd_"))
-async def delivery_add_type(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-
-    parts = callback.data.split("_")
-    # dadd_text_1, dadd_photo_1, etc.
-    if len(parts) < 3:
+    pending = get_pending_withdrawals()
+    if not pending:
+        await callback.message.edit_text("No pending withdrawals.", reply_markup=admin_menu())
         await callback.answer()
         return
 
-    dtype = parts[1]
-    product_id = int(parts[2])
+    buttons = []
+    for w_id, vendor_id, amount, created, shop_name in pending:
+        buttons.append([
+            InlineKeyboardButton(text=f"{shop_name}: {amount}$", callback_data=f"adm_w_{w_id}"),
+            InlineKeyboardButton(text="✅", callback_data=f"adm_wappr_{w_id}"),
+            InlineKeyboardButton(text="❌", callback_data=f"adm_wrej_{w_id}"),
+        ])
+    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="admin_panel")])
 
-    if dtype == "menu":
-        return
-
-    await state.update_data(delivery_product_id=product_id, delivery_type=dtype)
-    await state.set_state(DeliveryAdd.content)
-
-    prompts = {
-        "text": "Send the text content:",
-        "photo": "Send a photo:",
-        "video": "Send a video:",
-        "file": "Send a file:",
-        "coords": "Send coordinates (lat,lon):",
-    }
-    await callback.message.edit_text(prompts.get(dtype, "Send content:"))
-    await callback.answer()
-
-
-@router.message(DeliveryAdd.content)
-async def delivery_add_content(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-
-    data = await state.get_data()
-    product_id = data["delivery_product_id"]
-    dtype = data["delivery_type"]
-
-    content = ""
-    file_id = None
-
-    if dtype == "text":
-        content = message.text or ""
-    elif dtype == "coords":
-        content = message.text or ""
-    elif dtype == "photo":
-        if message.photo:
-            file_id = message.photo[-1].file_id
-            content = message.caption or ""
-        else:
-            await message.answer("Please send a photo.")
-            return
-    elif dtype == "video":
-        if message.video:
-            file_id = message.video.file_id
-            content = message.caption or ""
-        else:
-            await message.answer("Please send a video.")
-            return
-    elif dtype == "file":
-        if message.document:
-            file_id = message.document.file_id
-            content = message.caption or ""
-        else:
-            await message.answer("Please send a file.")
-            return
-
-    # Map 'coords' back to 'coordinates' for storage
-    store_type = "coordinates" if dtype == "coords" else dtype
-    add_delivery_item(product_id, store_type, content, file_id)
-    await state.clear()
-    await message.answer(
-        f"Delivery item ({store_type}) added.",
-        reply_markup=delivery_type_keyboard(product_id),
-    )
-
-
-@router.callback_query(lambda c: c.data.startswith("dclear_"))
-async def delivery_clear(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    product_id = int(callback.data.split("_")[1])
-    clear_delivery_items(product_id)
     await callback.message.edit_text(
-        "All delivery items cleared.",
-        reply_markup=delivery_type_keyboard(product_id),
+        "<b>Pending Withdrawals</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("adm_wappr_"))
+async def adm_approve_withdrawal(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    w_id = int(callback.data.split("_")[2])
+    update_withdrawal_status(w_id, "approved")
+    await callback.answer("Approved")
+    await callback.message.edit_text("Withdrawal approved.", reply_markup=admin_menu())
+
+
+@router.callback_query(lambda c: c.data.startswith("adm_wrej_"))
+async def adm_reject_withdrawal(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    w_id = int(callback.data.split("_")[2])
+    update_withdrawal_status(w_id, "rejected")
+    await callback.answer("Rejected")
+    await callback.message.edit_text("Withdrawal rejected.", reply_markup=admin_menu())
 
 
 # --- Promo Media ---
 
 @router.callback_query(lambda c: c.data == "adm_promo")
-async def promo_menu(callback: CallbackQuery, state: FSMContext):
+async def adm_promo(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
 
-    current_type = get_setting("promo_type", "none")
-    current_caption = get_setting("promo_caption", "")
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📷 Set Photo", callback_data="promo_set_photo")],
-        [InlineKeyboardButton(text="🎬 Set Video", callback_data="promo_set_video")],
-        [InlineKeyboardButton(text="🎞 Set GIF", callback_data="promo_set_gif")],
-        [InlineKeyboardButton(text="🗑 Remove Promo", callback_data="promo_remove")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="admin_panel")],
-    ])
-
+    current_type = get_setting("promo_type") or "None"
+    await state.set_state(PromoMedia.media)
     await callback.message.edit_text(
-        f"<b>Promo Media</b>\n\n"
-        f"Current: {current_type}\n"
-        f"Caption: {current_caption or '—'}",
-        parse_mode="HTML",
-        reply_markup=kb,
+        f"Current promo: {current_type}\n\nSend a GIF, video, or photo to set as promo:"
     )
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("promo_set_"))
-async def promo_set(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    media_type = callback.data.split("_")[2]  # photo, video, gif
-    await state.update_data(promo_media_type=media_type)
-    await state.set_state(PromoMedia.waiting_media)
-    await callback.message.edit_text(f"Send a {media_type} for the /start promo:")
-    await callback.answer()
-
-
-@router.message(PromoMedia.waiting_media)
-async def promo_receive(message: Message, state: FSMContext):
+@router.message(PromoMedia.media)
+async def adm_promo_media(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
 
-    data = await state.get_data()
-    media_type = data["promo_media_type"]
-    file_id = None
-    caption = ""
-
-    if media_type == "photo" and message.photo:
-        file_id = message.photo[-1].file_id
-        caption = message.caption or ""
-    elif media_type == "video" and message.video:
-        file_id = message.video.file_id
-        caption = message.caption or ""
-    elif media_type == "gif" and message.animation:
-        file_id = message.animation.file_id
-        caption = message.caption or ""
+    if message.animation:
+        set_setting("promo_type", "gif")
+        set_setting("promo_file_id", message.animation.file_id)
+    elif message.video:
+        set_setting("promo_type", "video")
+        set_setting("promo_file_id", message.video.file_id)
+    elif message.photo:
+        set_setting("promo_type", "photo")
+        set_setting("promo_file_id", message.photo[-1].file_id)
     else:
-        await message.answer(f"Please send a valid {media_type}.")
+        await message.answer("Send a GIF, video, or photo.")
         return
 
-    set_setting("promo_type", media_type)
-    set_setting("promo_file_id", file_id)
-    set_setting("promo_caption", caption)
+    set_setting("promo_caption", message.caption or "")
     await state.clear()
-    await message.answer("Promo media updated.", reply_markup=admin_menu())
-
-
-@router.callback_query(lambda c: c.data == "promo_remove")
-async def promo_remove(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
-        return
-    set_setting("promo_type", "")
-    set_setting("promo_file_id", "")
-    set_setting("promo_caption", "")
-    await callback.message.edit_text("Promo media removed.", reply_markup=admin_menu())
-    await callback.answer()
+    await message.answer("Promo media updated.", reply_markup=back_to_menu())
 
 
 # --- Broadcast ---
 
 @router.callback_query(lambda c: c.data == "adm_broadcast")
-async def broadcast_menu(callback: CallbackQuery):
+async def adm_broadcast(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
-
-    user_count = get_user_count()
     await callback.message.edit_text(
-        f"<b>Broadcast</b>\n\nRecipients: {user_count} users\n\nSelect media type:",
-        parse_mode="HTML",
+        "Select broadcast type:",
         reply_markup=broadcast_type_keyboard(),
     )
     await callback.answer()
 
 
 @router.callback_query(lambda c: c.data.startswith("bc_"))
-async def broadcast_type(callback: CallbackQuery, state: FSMContext):
+async def adm_bc_type(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
-        await callback.answer("Access denied")
         return
-
-    media_type = callback.data.split("_")[1]  # photo or video
-    await state.update_data(bc_type=media_type)
-    await state.set_state(BroadcastState.waiting_media)
-    await callback.message.edit_text(f"Send a {media_type} to broadcast:")
+    bc_type = callback.data.split("_")[1]
+    await state.update_data(bc_type=bc_type)
+    await state.set_state(BroadcastState.media)
+    await callback.message.edit_text(f"Send the {bc_type} for broadcast:")
     await callback.answer()
 
 
-@router.message(BroadcastState.waiting_media)
-async def broadcast_send(message: Message, state: FSMContext):
+@router.message(BroadcastState.media)
+async def adm_bc_media(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
 
     data = await state.get_data()
-    media_type = data["bc_type"]
-    file_id = None
-    caption = ""
+    bc_type = data["bc_type"]
 
-    if media_type == "photo" and message.photo:
+    file_id = None
+    if bc_type == "photo" and message.photo:
         file_id = message.photo[-1].file_id
-        caption = message.caption or ""
-    elif media_type == "video" and message.video:
+    elif bc_type == "video" and message.video:
         file_id = message.video.file_id
-        caption = message.caption or ""
     else:
-        await message.answer(f"Please send a valid {media_type}.")
+        await message.answer(f"Send a valid {bc_type}.")
         return
 
-    await state.clear()
+    caption = message.caption or ""
+    save_broadcast(bc_type, file_id, caption)
 
+    # Send to all users
     users = get_all_users()
     sent = 0
-    failed = 0
-
-    for uid in users:
+    for user_id in users:
         try:
-            if media_type == "photo":
-                await message.bot.send_photo(uid, file_id, caption=caption or None)
-            elif media_type == "video":
-                await message.bot.send_video(uid, file_id, caption=caption or None)
+            if bc_type == "photo":
+                await message.bot.send_photo(user_id, file_id, caption=caption or None)
+            else:
+                await message.bot.send_video(user_id, file_id, caption=caption or None)
             sent += 1
         except Exception:
-            failed += 1
+            pass
 
-    save_broadcast(media_type, file_id, caption)
-
+    await state.clear()
     await message.answer(
-        f"<b>Broadcast complete</b>\n\n"
-        f"Sent: {sent}\n"
-        f"Failed: {failed}",
-        parse_mode="HTML",
-        reply_markup=admin_menu(),
+        f"Broadcast sent to {sent}/{len(users)} users.",
+        reply_markup=back_to_menu(),
     )
 
 
-# --- Order Status (legacy command support) ---
+# --- Stats ---
 
-@router.message(lambda m: m.text and m.text.startswith("/set"))
-async def set_status(message: Message):
-    if not is_admin(message.from_user.id):
+@router.callback_query(lambda c: c.data == "adm_stats")
+async def adm_stats(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Access denied")
         return
 
-    try:
-        _, order_id, status = message.text.split("|")
-        update_order_status(int(order_id.strip()), status.strip())
-        await message.answer(f"Order {order_id} → {status}")
-    except (ValueError, TypeError):
-        await message.answer("Format: /set|id|status")
+    user_count = get_user_count()
+    vendors = get_all_vendors()
+    cities = get_all_cities()
+
+    text = (
+        f"<b>Stats</b>\n\n"
+        f"Users: {user_count}\n"
+        f"Vendors: {len(vendors)}\n"
+        f"Cities: {len(cities)}"
+    )
+    await callback.message.edit_text(
+        text, parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="admin_panel")],
+        ]),
+    )
+    await callback.answer()

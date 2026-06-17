@@ -1,7 +1,7 @@
 from db.database import get_conn
 
 
-def add_to_cart(telegram_id, product_id, quantity):
+def add_to_cart(telegram_id, product_id, quantity=1):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -24,10 +24,11 @@ def add_to_cart(telegram_id, product_id, quantity):
 
 
 def get_cart(telegram_id):
+    """Returns [(product_id, name, price, quantity, vendor_id)]."""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        """SELECT p.name, p.price, c.quantity
+        """SELECT p.id, p.name, p.price, c.quantity, p.vendor_id
            FROM cart c JOIN products p ON c.product_id = p.id
            WHERE c.telegram_id = ?""",
         (telegram_id,),
@@ -53,5 +54,16 @@ def clear_cart(telegram_id):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("DELETE FROM cart WHERE telegram_id = ?", (telegram_id,))
+    conn.commit()
+    conn.close()
+
+
+def remove_from_cart(telegram_id, product_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM cart WHERE telegram_id = ? AND product_id = ?",
+        (telegram_id, product_id),
+    )
     conn.commit()
     conn.close()
