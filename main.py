@@ -1,5 +1,6 @@
 import asyncio
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from config import TOKEN
 from db.database import init_db
 
@@ -10,7 +11,7 @@ from routers.checkout import router as checkout_router
 from routers.admin import router as admin_router
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 
 dp.include_router(start_router)
 dp.include_router(shop_router)
@@ -18,9 +19,11 @@ dp.include_router(cart_router)
 dp.include_router(checkout_router)
 dp.include_router(admin_router)
 
+
 async def main():
     init_db()
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

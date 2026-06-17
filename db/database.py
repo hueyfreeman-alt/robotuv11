@@ -16,10 +16,30 @@ def init_db():
     CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
+        description TEXT DEFAULT '',
         price REAL,
         stock INTEGER,
         category TEXT,
         type TEXT
+    )
+    """)
+
+    # Add description column if missing (migration)
+    try:
+        cur.execute("ALTER TABLE products ADD COLUMN description TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+
+    # PRODUCT DELIVERY ITEMS
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS product_delivery (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER,
+        delivery_type TEXT,
+        content TEXT,
+        file_id TEXT DEFAULT NULL,
+        sort_order INTEGER DEFAULT 0,
+        FOREIGN KEY (product_id) REFERENCES products(id)
     )
     """)
 
@@ -61,6 +81,34 @@ def init_db():
         order_id INTEGER,
         provider TEXT,
         status TEXT
+    )
+    """)
+
+    # SETTINGS (key-value store for admin config)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )
+    """)
+
+    # BROADCASTS
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS broadcasts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_type TEXT,
+        file_id TEXT,
+        caption TEXT DEFAULT '',
+        sent_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # USERS (track bot users for broadcasts)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        telegram_id INTEGER PRIMARY KEY,
+        username TEXT DEFAULT '',
+        joined_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """)
 

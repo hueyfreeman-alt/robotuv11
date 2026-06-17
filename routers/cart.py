@@ -1,6 +1,8 @@
 from aiogram import Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery
+
 from services.cart_service import get_cart, clear_cart
+from ui.keyboards import cart_keyboard, back_to_menu
 
 router = Router()
 
@@ -10,27 +12,39 @@ async def cart(callback: CallbackQuery):
     items = get_cart(callback.from_user.id)
 
     if not items:
-        await callback.message.answer("🛒 Cart empty")
+        await callback.message.edit_text(
+            "Your cart is empty.",
+            reply_markup=back_to_menu(),
+        )
+        await callback.answer()
         return
 
     total = 0
-    text = "🛒 CART:\n\n"
-
+    lines = []
     for name, price, qty in items:
-        total += price * qty
-        text += f"{name} x{qty} = {price * qty}$\n"
+        subtotal = price * qty
+        total += subtotal
+        lines.append(f"  {name} x{qty} — {subtotal}$")
 
-    text += f"\n💰 TOTAL: {total}$"
+    text = (
+        "<b>🛒 Your Cart</b>\n\n"
+        + "\n".join(lines)
+        + f"\n\n<b>Total: {total}$</b>"
+    )
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Checkout", callback_data="checkout")],
-        [InlineKeyboardButton(text="🧹 Clear", callback_data="clear_cart")]
-    ])
-
-    await callback.message.answer(text, reply_markup=kb)
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=cart_keyboard(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == "clear_cart")
 async def clear(callback: CallbackQuery):
     clear_cart(callback.from_user.id)
-    await callback.answer("Cleared 🧹")
+    await callback.message.edit_text(
+        "Cart cleared.",
+        reply_markup=back_to_menu(),
+    )
+    await callback.answer()
