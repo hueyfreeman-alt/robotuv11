@@ -3,9 +3,7 @@ from aiogram.types import CallbackQuery
 
 from services.cart_service import get_cart, get_cart_raw, clear_cart
 from services.order_service import create_order, add_order_items
-from services.product_service import decrease_stock
 from services.payment_service import create_payment
-from services.delivery_service import deliver_by_product_ids
 from ui.keyboards import back_to_menu
 
 router = Router()
@@ -31,21 +29,14 @@ async def checkout(callback: CallbackQuery):
     raw = get_cart_raw(user_id)
     add_order_items(order_id, raw)
 
-    product_ids = []
-    for pid, qty in raw:
-        decrease_stock(pid, qty)
-        product_ids.append(pid)
-
     create_payment(order_id, total)
     clear_cart(user_id)
 
-    # Deliver digital content
-    await deliver_by_product_ids(callback.bot, user_id, product_ids)
-
     await callback.message.answer(
-        f"<b>Order #{order_id} confirmed</b>\n"
+        f"<b>Order #{order_id} created</b>\n"
         f"Total: {total}$\n\n"
-        "Your digital items have been delivered above.",
+        "Payment status: pending.\n"
+        "Your digital items will be delivered after payment confirmation.",
         parse_mode="HTML",
         reply_markup=back_to_menu(),
     )

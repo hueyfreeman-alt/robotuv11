@@ -70,5 +70,6 @@ cp data/shop.db data/shop.db.backup
 ## Notes before production use
 
 - Run only one bot container at a time when using Telegram polling.
-- Checkout currently uses an internal paid status and does not integrate a real payment provider.
+- Checkout creates a pending `oxapay` payment record and does not auto-deliver products.
+- Add an OxaPay webhook or a manual fulfillment flow before accepting real customer payments.
 - SQLite is fine for a small single-instance bot. For heavier usage, consider PostgreSQL.
