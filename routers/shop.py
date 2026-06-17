@@ -1,38 +1,69 @@
 from aiogram import Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from services.product_service import get_all_products
+from aiogram.types import CallbackQuery
+
+from services.product_service import get_categories, get_products_by_category
 from services.cart_service import add_to_cart
+from ui.keyboards import category_keyboard, product_actions, back_to_menu
 
 router = Router()
 
 
 @router.callback_query(lambda c: c.data == "shop")
 async def shop(callback: CallbackQuery):
-    products = get_all_products()
+    categories = get_categories()
 
+    if not categories:
+        await callback.message.edit_text(
+            "No products available.",
+            reply_markup=back_to_menu(),
+        )
+        await callback.answer()
+        return
+
+    if len(categories) == 1:
+        # Skip category selection if only one
+        products = get_products_by_category(categories[0])
+        await _show_products(callback, products)
+    else:
+        await callback.message.edit_text(
+            "Select a category:",
+            reply_markup=category_keyboard(categories),
+        )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("cat_"))
+async def category(callback: CallbackQuery):
+    cat = callback.data[4:]
+    products = get_products_by_category(cat)
+    await _show_products(callback, products)
+    await callback.answer()
+
+
+async def _show_products(callback: CallbackQuery, products):
     if not products:
-        await callback.message.answer("❌ No products")
+        await callback.message.edit_text(
+            "No products in this category.",
+            reply_markup=back_to_menu(),
+        )
         return
 
     for p in products:
         pid, name, price, stock, category, ptype = p
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Add", callback_data=f"add_{pid}")]
-        ])
-
-        await callback.message.answer(
-            f"📦 {name}\n💰 {price}$\n📦 Stock: {stock}",
-            reply_markup=kb
+        text = (
+            f"<b>{name}</b>\n"
+            f"Price: {price}$\n"
+            f"In stock: {stock}"
         )
-
-    await callback.answer()
+        await callback.message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=product_actions(pid),
+        )
 
 
 @router.callback_query(lambda c: c.data.startswith("add_"))
 async def add(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[1])
-
     add_to_cart(callback.from_user.id, product_id, 1)
-
-    await callback.answer("Added ✅")
+    await callback.answer("Added to cart")

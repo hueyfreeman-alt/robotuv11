@@ -5,7 +5,8 @@ from services.cart_service import get_cart, get_cart_raw, clear_cart
 from services.order_service import create_order, add_order_items
 from services.product_service import decrease_stock
 from services.payment_service import create_payment
-from services.delivery_service import deliver
+from services.delivery_service import deliver_by_product_ids
+from ui.keyboards import back_to_menu
 
 router = Router()
 
@@ -13,11 +14,14 @@ router = Router()
 @router.callback_query(lambda c: c.data == "checkout")
 async def checkout(callback: CallbackQuery):
     user_id = callback.from_user.id
-
     items = get_cart(user_id)
 
     if not items:
-        await callback.message.answer("Cart empty")
+        await callback.message.edit_text(
+            "Cart is empty.",
+            reply_markup=back_to_menu(),
+        )
+        await callback.answer()
         return
 
     total = sum(price * qty for _, price, qty in items)
@@ -27,17 +31,22 @@ async def checkout(callback: CallbackQuery):
     raw = get_cart_raw(user_id)
     add_order_items(order_id, raw)
 
+    product_ids = []
     for pid, qty in raw:
         decrease_stock(pid, qty)
+        product_ids.append(pid)
 
     create_payment(order_id, total)
-
     clear_cart(user_id)
 
-    await deliver(callback.bot, user_id, items)
+    # Deliver digital content
+    await deliver_by_product_ids(callback.bot, user_id, product_ids)
 
     await callback.message.answer(
-        f"✅ ORDER #{order_id}\n💰 {total}$"
+        f"<b>Order #{order_id} confirmed</b>\n"
+        f"Total: {total}$\n\n"
+        "Your digital items have been delivered above.",
+        parse_mode="HTML",
+        reply_markup=back_to_menu(),
     )
-
     await callback.answer()
