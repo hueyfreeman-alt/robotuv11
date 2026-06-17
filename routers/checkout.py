@@ -1,7 +1,9 @@
 from aiogram import Router
 from aiogram.types import CallbackQuery
 
-from services.cart_service import get_cart, get_cart_raw, clear_cart
+from services.cart_service import (
+    get_cart, get_cart_raw, clear_cart, compute_cart_total,
+)
 from services.order_service import create_order, add_order_items
 from services.product_service import decrease_stock
 from services.payment_service import create_payment
@@ -24,7 +26,7 @@ async def checkout(callback: CallbackQuery):
         await callback.answer()
         return
 
-    total = sum(price * qty for _, price, qty in items)
+    total = compute_cart_total(items)
 
     order_id = create_order(user_id, total, "mixed")
 
