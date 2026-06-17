@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -26,6 +28,8 @@ from services.settings_service import get_setting, set_setting
 from services.user_service import get_all_users, get_user_count
 from services.broadcast_service import save_broadcast
 from services.order_service import update_order_status
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -89,8 +93,13 @@ async def stats(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
-    user_count = get_user_count()
-    products = get_all_products()
+    try:
+        user_count = get_user_count()
+        products = get_all_products()
+    except Exception as e:
+        logger.error("Failed to fetch stats: %s", e)
+        await callback.answer("Failed to load stats")
+        return
     await callback.message.edit_text(
         f"<b>Stats</b>\n\n"
         f"Users: {user_count}\n"
@@ -147,7 +156,13 @@ async def view_product(callback: CallbackQuery):
         await callback.answer("Access denied")
         return
 
-    product_id = int(callback.data.split("_")[1])
+    try:
+        product_id = int(callback.data.split("_")[1])
+    except (ValueError, IndexError) as e:
+        logger.warning("Invalid vprod callback data: %r — %s", callback.data, e)
+        await callback.answer("Invalid product")
+        return
+
     p = get_product(product_id)
     if not p:
         await callback.answer("Product not found")
@@ -245,14 +260,20 @@ async def add_product_category(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     data = await state.get_data()
-    product_id = add_product(
-        name=data["name"],
-        description=data["description"],
-        price=data["price"],
-        stock=data["stock"],
-        category=message.text,
-        ptype="digital",
-    )
+    try:
+        product_id = add_product(
+            name=data["name"],
+            description=data["description"],
+            price=data["price"],
+            stock=data["stock"],
+            category=message.text,
+            ptype="digital",
+        )
+    except Exception as e:
+        logger.error("Failed to add product: %s", e)
+        await state.clear()
+        await message.answer("❌ Failed to create product. Check logs.")
+        return
     await state.clear()
     await message.answer(
         f"Product #{product_id} created.\n\nAdd delivery items now:",
@@ -268,7 +289,13 @@ async def edit_product_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Access denied")
         return
 
-    product_id = int(callback.data.split("_")[1])
+    try:
+        product_id = int(callback.data.split("_")[1])
+    except (ValueError, IndexError) as e:
+        logger.warning("Invalid vedit callback data: %r — %s", callback.data, e)
+        await callback.answer("Invalid product")
+        return
+
     await state.update_data(edit_product_id=product_id)
     await state.set_state(EditProduct.field)
 
@@ -320,7 +347,13 @@ async def edit_product_value(message: Message, state: FSMContext):
             await message.answer("Invalid number.")
             return
 
-    update_product(product_id, **{field: value})
+    try:
+        update_product(product_id, **{field: value})
+    except Exception as e:
+        logger.error("Failed to update product %d field %s: %s", product_id, field, e)
+        await state.clear()
+        await message.answer("❌ Failed to update product.")
+        return
     await state.clear()
     await message.answer(f"Updated {field}.", reply_markup=vendor_product_actions(product_id))
 
@@ -332,8 +365,18 @@ async def delete_prod(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
-    product_id = int(callback.data.split("_")[1])
-    delete_product(product_id)
+    try:
+        product_id = int(callback.data.split("_")[1])
+    except (ValueError, IndexError) as e:
+        logger.warning("Invalid vdel callback data: %r — %s", callback.data, e)
+        await callback.answer("Invalid product")
+        return
+    try:
+        delete_product(product_id)
+    except Exception as e:
+        logger.error("Failed to delete product %d: %s", product_id, e)
+        await callback.answer("❌ Failed to delete product")
+        return
     await callback.message.edit_text("Product deleted.", reply_markup=admin_menu())
     await callback.answer()
 
@@ -379,7 +422,13 @@ async def view_delivery(callback: CallbackQuery):
         await callback.answer("Access denied")
         return
 
-    product_id = int(callback.data.split("_")[1])
+    try:
+        product_id = int(callback.data.split("_")[1])
+    except (ValueError, IndexError) as e:
+        logger.warning("Invalid vdeliv callback data: %r — %s", callback.data, e)
+        await callback.answer("Invalid product")
+        return
+
     items = get_delivery_items(product_id)
     p = get_product(product_id)
     name = p[1] if p else "Unknown"
@@ -409,7 +458,12 @@ async def delivery_add_menu(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
-    product_id = int(callback.data.split("_")[2])
+    try:
+        product_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError) as e:
+        logger.warning("Invalid dadd_menu callback data: %r — %s", callback.data, e)
+        await callback.answer("Invalid product")
+        return
     await callback.message.edit_text(
         "Select delivery type:",
         reply_markup=delivery_type_keyboard(product_id),
@@ -430,7 +484,12 @@ async def delivery_add_type(callback: CallbackQuery, state: FSMContext):
         return
 
     dtype = parts[1]
-    product_id = int(parts[2])
+    try:
+        product_id = int(parts[2])
+    except (ValueError, IndexError) as e:
+        logger.warning("Invalid dadd callback data: %r — %s", callback.data, e)
+        await callback.answer("Invalid product")
+        return
 
     if dtype == "menu":
         return
@@ -489,7 +548,13 @@ async def delivery_add_content(message: Message, state: FSMContext):
 
     # Map 'coords' back to 'coordinates' for storage
     store_type = "coordinates" if dtype == "coords" else dtype
-    add_delivery_item(product_id, store_type, content, file_id)
+    try:
+        add_delivery_item(product_id, store_type, content, file_id)
+    except Exception as e:
+        logger.error("Failed to add delivery item for product %d: %s", product_id, e)
+        await state.clear()
+        await message.answer("❌ Failed to add delivery item.")
+        return
     await state.clear()
     await message.answer(
         f"Delivery item ({store_type}) added.",
@@ -502,8 +567,18 @@ async def delivery_clear(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
-    product_id = int(callback.data.split("_")[1])
-    clear_delivery_items(product_id)
+    try:
+        product_id = int(callback.data.split("_")[1])
+    except (ValueError, IndexError) as e:
+        logger.warning("Invalid dclear callback data: %r — %s", callback.data, e)
+        await callback.answer("Invalid product")
+        return
+    try:
+        clear_delivery_items(product_id)
+    except Exception as e:
+        logger.error("Failed to clear delivery items for product %d: %s", product_id, e)
+        await callback.answer("❌ Failed to clear delivery items")
+        return
     await callback.message.edit_text(
         "All delivery items cleared.",
         reply_markup=delivery_type_keyboard(product_id),
@@ -577,9 +652,15 @@ async def promo_receive(message: Message, state: FSMContext):
         await message.answer(f"Please send a valid {media_type}.")
         return
 
-    set_setting("promo_type", media_type)
-    set_setting("promo_file_id", file_id)
-    set_setting("promo_caption", caption)
+    try:
+        set_setting("promo_type", media_type)
+        set_setting("promo_file_id", file_id)
+        set_setting("promo_caption", caption)
+    except Exception as e:
+        logger.error("Failed to save promo settings: %s", e)
+        await state.clear()
+        await message.answer("❌ Failed to save promo media.")
+        return
     await state.clear()
     await message.answer("Promo media updated.", reply_markup=admin_menu())
 
@@ -589,9 +670,14 @@ async def promo_remove(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Access denied")
         return
-    set_setting("promo_type", "")
-    set_setting("promo_file_id", "")
-    set_setting("promo_caption", "")
+    try:
+        set_setting("promo_type", "")
+        set_setting("promo_file_id", "")
+        set_setting("promo_caption", "")
+    except Exception as e:
+        logger.error("Failed to remove promo settings: %s", e)
+        await callback.answer("❌ Failed to remove promo media")
+        return
     await callback.message.edit_text("Promo media removed.", reply_markup=admin_menu())
     await callback.answer()
 
@@ -604,7 +690,12 @@ async def broadcast_menu(callback: CallbackQuery):
         await callback.answer("Access denied")
         return
 
-    user_count = get_user_count()
+    try:
+        user_count = get_user_count()
+    except Exception as e:
+        logger.error("Failed to get user count for broadcast: %s", e)
+        await callback.answer("❌ Failed to load broadcast info")
+        return
     await callback.message.edit_text(
         f"<b>Broadcast</b>\n\nRecipients: {user_count} users\n\nSelect media type:",
         parse_mode="HTML",
@@ -659,10 +750,14 @@ async def broadcast_send(message: Message, state: FSMContext):
             elif media_type == "video":
                 await message.bot.send_video(uid, file_id, caption=caption or None)
             sent += 1
-        except Exception:
+        except Exception as e:
+            logger.warning("Broadcast failed for user %d: %s", uid, e)
             failed += 1
 
-    save_broadcast(media_type, file_id, caption)
+    try:
+        save_broadcast(media_type, file_id, caption)
+    except Exception as e:
+        logger.error("Failed to save broadcast record: %s", e)
 
     await message.answer(
         f"<b>Broadcast complete</b>\n\n"
@@ -681,8 +776,19 @@ async def set_status(message: Message):
         return
 
     try:
-        _, order_id, status = message.text.split("|")
-        update_order_status(int(order_id.strip()), status.strip())
-        await message.answer(f"Order {order_id} → {status}")
-    except (ValueError, TypeError):
-        await message.answer("Format: /set|id|status")
+        _, order_id_str, status = message.text.split("|")
+        order_id = int(order_id_str.strip())
+        status = status.strip()
+    except (ValueError, TypeError) as e:
+        logger.warning("Admin sent malformed /set command: %r — %s", message.text, e)
+        await message.answer("❌ Format: /set|id|status")
+        return
+
+    try:
+        update_order_status(order_id, status)
+        await message.answer(f"✅ Order {order_id} → {status}")
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+    except Exception as e:
+        logger.error("Failed to update order %d: %s", order_id, e)
+        await message.answer("❌ Failed to update order. Check logs.")
