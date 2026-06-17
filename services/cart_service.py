@@ -27,9 +27,12 @@ def get_cart(telegram_id):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        """SELECT p.name, p.price, c.quantity
-           FROM cart c JOIN products p ON c.product_id = p.id
-           WHERE c.telegram_id = ?""",
+        """
+        SELECT p.name, p.price, c.quantity
+        FROM cart c
+        JOIN products p ON c.product_id = p.id
+        WHERE c.telegram_id = ?
+        """,
         (telegram_id,),
     )
     rows = cur.fetchall()
