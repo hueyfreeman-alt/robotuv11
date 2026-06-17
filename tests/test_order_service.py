@@ -2,7 +2,12 @@ import sqlite3
 from unittest.mock import patch
 
 import db.database as database_mod
-from services.order_service import create_order, add_order_items
+from services.order_service import (
+    create_order,
+    add_order_items,
+    update_order_status,
+    get_order,
+)
 
 
 USER_ID = 12345
@@ -60,3 +65,26 @@ class TestAddOrderItems:
         ).fetchall()
         conn.close()
         assert rows == []
+
+
+class TestUpdateOrderStatus:
+    def test_updates_status(self, tmp_db):
+        with patch.object(database_mod, "DB_NAME", tmp_db):
+            oid = create_order(USER_ID, 10, "a")
+            update_order_status(oid, "shipped")
+            order = get_order(oid)
+            assert order[3] == "shipped"
+
+
+class TestGetOrder:
+    def test_existing(self, tmp_db):
+        with patch.object(database_mod, "DB_NAME", tmp_db):
+            oid = create_order(USER_ID, 99.0, "mixed")
+            order = get_order(oid)
+            assert order is not None
+            assert order[0] == oid
+            assert order[2] == 99.0
+
+    def test_missing(self, tmp_db):
+        with patch.object(database_mod, "DB_NAME", tmp_db):
+            assert get_order(999) is None
