@@ -1,9 +1,13 @@
-version: "3.8"
-
 services:
   bot:
     build: .
     container_name: telegram_shop_bot
-    restart: always
+    restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DB_PATH: ${DB_PATH:-/app/data/shop.db}
+    ports:
+      - "${WEBHOOK_PORT:-8080}:${WEBHOOK_PORT:-8080}"
+    volumes:
+      - ./data:/app/data
