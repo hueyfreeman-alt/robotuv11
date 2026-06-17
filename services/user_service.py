@@ -1,30 +1,22 @@
-from db.database import get_conn
+from db.database import get_cursor
 
 
 def register_user(telegram_id, username=""):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT OR IGNORE INTO users (telegram_id, username) VALUES (?, ?)",
-        (telegram_id, username),
-    )
-    conn.commit()
-    conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "INSERT OR IGNORE INTO users"
+            " (telegram_id, username) VALUES (?, ?)",
+            (telegram_id, username),
+        )
 
 
 def get_all_users():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT telegram_id FROM users")
-    rows = cur.fetchall()
-    conn.close()
-    return [r[0] for r in rows]
+    with get_cursor() as cur:
+        cur.execute("SELECT telegram_id FROM users")
+        return [r[0] for r in cur.fetchall()]
 
 
 def get_user_count():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM users")
-    count = cur.fetchone()[0]
-    conn.close()
-    return count
+    with get_cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM users")
+        return cur.fetchone()[0]

@@ -1,7 +1,7 @@
 from aiogram import Router
 from aiogram.types import CallbackQuery
 
-from services.cart_service import get_cart, clear_cart
+from services.cart_service import get_cart, clear_cart, compute_cart_total
 from ui.keyboards import cart_keyboard, back_to_menu
 
 router = Router()
@@ -19,15 +19,15 @@ async def cart(callback: CallbackQuery):
         await callback.answer()
         return
 
-    total = 0
+    total = compute_cart_total(items)
+
     lines = []
     for name, price, qty in items:
         subtotal = price * qty
-        total += subtotal
         lines.append(f"  {name} x{qty} — {subtotal}$")
 
     text = (
-        "<b>🛒 Your Cart</b>\n\n"
+        "<b>🛒Your Cart</b>\n\n"
         + "\n".join(lines)
         + f"\n\n<b>Total: {total}$</b>"
     )

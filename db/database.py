@@ -1,10 +1,22 @@
 import sqlite3
+from contextlib import contextmanager
 
 DB_NAME = "shop.db"
 
 
 def get_conn():
     return sqlite3.connect(DB_NAME)
+
+
+@contextmanager
+def get_cursor():
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        yield cur
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def init_db():
