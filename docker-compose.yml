@@ -7,5 +7,7 @@ services:
       - .env
     environment:
       DB_PATH: ${DB_PATH:-/app/data/shop.db}
+    ports:
+      - "${WEBHOOK_PORT:-8080}:${WEBHOOK_PORT:-8080}"
     volumes:
       - ./data:/app/data

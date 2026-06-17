@@ -26,6 +26,18 @@ def add_order_items(order_id, items):
     conn.close()
 
 
+def get_order_items(order_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
+        (order_id,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
 def update_order_status(order_id, status):
     conn = get_conn()
     cur = conn.cursor()

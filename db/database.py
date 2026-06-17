@@ -84,10 +84,30 @@ def init_db():
     CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER,
+        amount REAL DEFAULT 0,
         provider TEXT,
-        status TEXT
+        status TEXT,
+        track_id TEXT,
+        payment_url TEXT DEFAULT '',
+        raw_status TEXT DEFAULT ''
     )
     """)
+
+    for column, definition in (
+        ("amount", "REAL DEFAULT 0"),
+        ("track_id", "TEXT"),
+        ("payment_url", "TEXT DEFAULT ''"),
+        ("raw_status", "TEXT DEFAULT ''"),
+    ):
+        try:
+            cur.execute(f"ALTER TABLE payments ADD COLUMN {column} {definition}")
+        except sqlite3.OperationalError:
+            pass
+
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_track_id "
+        "ON payments(track_id) WHERE track_id IS NOT NULL"
+    )
 
     # SETTINGS (key-value store for admin config)
     cur.execute("""
