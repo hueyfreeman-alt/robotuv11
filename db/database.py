@@ -1,9 +1,14 @@
+import os
 import sqlite3
+from pathlib import Path
 
-DB_NAME = "shop.db"
+DB_NAME = os.getenv("DB_PATH", "shop.db")
 
 
 def get_conn():
+    db_path = Path(DB_NAME)
+    if db_path.parent != Path("."):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(DB_NAME)
 
 
