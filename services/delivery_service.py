@@ -6,7 +6,7 @@ def get_delivery_items(product_id):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT delivery_type, content, file_id FROM product_delivery WHERE product_id = ? ORDER BY sort_order",
+        "SELECT id, delivery_type, content, file_id FROM product_delivery WHERE product_id = ? ORDER BY sort_order",
         (product_id,),
     )
     rows = cur.fetchall()
@@ -46,93 +46,36 @@ def delete_delivery_item(item_id):
     conn.close()
 
 
-async def deliver(bot: Bot, user_id: int, cart_items):
-    """Deliver all digital content for purchased products."""
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Get product IDs from cart (cart_items has name, price, qty - need to look up IDs)
-    cur.execute(
-        """SELECT DISTINCT c.product_id
-           FROM cart c JOIN products p ON c.product_id = p.id
-           WHERE c.telegram_id = ?""",
-        (user_id,),
-    )
-    product_ids_from_cart = cur.fetchall()
-
-    # If cart already cleared, look up by product names
-    if not product_ids_from_cart:
-        for name, _, _ in cart_items:
-            cur.execute("SELECT id FROM products WHERE name = ?", (name,))
-            row = cur.fetchone()
-            if row:
-                product_ids_from_cart.append((row[0],))
-
-    for (product_id,) in product_ids_from_cart:
-        items = get_delivery_items(product_id)
-        if not items:
-            continue
-
-        await bot.send_message(user_id, "📦 <b>Digital Delivery:</b>", parse_mode="HTML")
-
-        for delivery_type, content, file_id in items:
-            if delivery_type == "text":
-                await bot.send_message(user_id, f"📝 {content}", parse_mode="HTML")
-            elif delivery_type == "photo":
-                if file_id:
-                    await bot.send_photo(user_id, file_id, caption=content or None)
-                else:
-                    await bot.send_message(user_id, f"🖼 {content}")
-            elif delivery_type == "video":
-                if file_id:
-                    await bot.send_video(user_id, file_id, caption=content or None)
-                else:
-                    await bot.send_message(user_id, f"🎬 {content}")
-            elif delivery_type == "file":
-                if file_id:
-                    await bot.send_document(user_id, file_id, caption=content or None)
-                else:
-                    await bot.send_message(user_id, f"📁 {content}")
-            elif delivery_type == "coordinates":
-                try:
-                    lat, lon = content.split(",")
-                    await bot.send_location(user_id, float(lat.strip()), float(lon.strip()))
-                except (ValueError, AttributeError):
-                    await bot.send_message(user_id, f"📍 {content}")
-
-    conn.close()
-
-
-async def deliver_by_product_ids(bot: Bot, user_id: int, product_ids):
-    """Deliver digital content for specific product IDs."""
+async def deliver_digital(bot: Bot, user_id: int, product_ids: list):
+    """Deliver all configured digital items for the given product IDs."""
     for product_id in product_ids:
         items = get_delivery_items(product_id)
         if not items:
             continue
 
-        await bot.send_message(user_id, "📦 <b>Digital Delivery:</b>", parse_mode="HTML")
-
-        for delivery_type, content, file_id in items:
+        for item_id, delivery_type, content, file_id in items:
             if delivery_type == "text":
-                await bot.send_message(user_id, f"📝 {content}", parse_mode="HTML")
+                await bot.send_message(user_id, content, parse_mode="HTML")
+            elif delivery_type == "description":
+                await bot.send_message(user_id, f"<i>{content}</i>", parse_mode="HTML")
             elif delivery_type == "photo":
                 if file_id:
                     await bot.send_photo(user_id, file_id, caption=content or None)
-                else:
-                    await bot.send_message(user_id, f"🖼 {content}")
+                elif content:
+                    await bot.send_message(user_id, content)
             elif delivery_type == "video":
                 if file_id:
                     await bot.send_video(user_id, file_id, caption=content or None)
-                else:
-                    await bot.send_message(user_id, f"🎬 {content}")
+                elif content:
+                    await bot.send_message(user_id, content)
             elif delivery_type == "file":
                 if file_id:
                     await bot.send_document(user_id, file_id, caption=content or None)
-                else:
-                    await bot.send_message(user_id, f"📁 {content}")
+                elif content:
+                    await bot.send_message(user_id, content)
             elif delivery_type == "coordinates":
                 try:
                     lat, lon = content.split(",")
                     await bot.send_location(user_id, float(lat.strip()), float(lon.strip()))
                 except (ValueError, AttributeError):
-                    await bot.send_message(user_id, f"📍 {content}")
+                    await bot.send_message(user_id, f"Location: {content}")

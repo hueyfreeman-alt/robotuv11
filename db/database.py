@@ -11,32 +11,55 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
 
+    # CITIES
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        is_active INTEGER DEFAULT 1
+    )
+    """)
+
+    # VENDORS
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS vendors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER UNIQUE NOT NULL,
+        city_id INTEGER NOT NULL,
+        shop_name TEXT NOT NULL,
+        shop_description TEXT DEFAULT '',
+        is_active INTEGER DEFAULT 1,
+        wallet_balance REAL DEFAULT 0.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (city_id) REFERENCES cities(id)
+    )
+    """)
+
     # PRODUCTS
     cur.execute("""
     CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
+        vendor_id INTEGER NOT NULL,
+        city_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
         description TEXT DEFAULT '',
-        price REAL,
-        stock INTEGER,
-        category TEXT,
-        type TEXT
+        price REAL NOT NULL,
+        stock INTEGER DEFAULT 0,
+        category TEXT DEFAULT '',
+        type TEXT DEFAULT 'digital',
+        allow_preorder INTEGER DEFAULT 0,
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id),
+        FOREIGN KEY (city_id) REFERENCES cities(id)
     )
     """)
-
-    # Add description column if missing (migration)
-    try:
-        cur.execute("ALTER TABLE products ADD COLUMN description TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
 
     # PRODUCT DELIVERY ITEMS
     cur.execute("""
     CREATE TABLE IF NOT EXISTS product_delivery (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER,
-        delivery_type TEXT,
-        content TEXT,
+        product_id INTEGER NOT NULL,
+        delivery_type TEXT NOT NULL,
+        content TEXT DEFAULT '',
         file_id TEXT DEFAULT NULL,
         sort_order INTEGER DEFAULT 0,
         FOREIGN KEY (product_id) REFERENCES products(id)
@@ -47,9 +70,9 @@ def init_db():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS cart (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER,
-        product_id INTEGER,
-        quantity INTEGER
+        telegram_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER DEFAULT 1
     )
     """)
 
@@ -57,10 +80,13 @@ def init_db():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER,
-        total REAL,
-        status TEXT,
-        type TEXT
+        telegram_id INTEGER NOT NULL,
+        vendor_id INTEGER NOT NULL,
+        total REAL NOT NULL,
+        status TEXT DEFAULT 'pending',
+        delivery_type TEXT DEFAULT 'digital',
+        reviewed INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
@@ -68,23 +94,108 @@ def init_db():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS order_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER,
-        product_id INTEGER,
-        quantity INTEGER
+        order_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER DEFAULT 1,
+        FOREIGN KEY (order_id) REFERENCES orders(id)
     )
     """)
 
-    # PAYMENTS
+    # USERS
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS payments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER,
-        provider TEXT,
-        status TEXT
+    CREATE TABLE IF NOT EXISTS users (
+        telegram_id INTEGER PRIMARY KEY,
+        username TEXT DEFAULT '',
+        balance REAL DEFAULT 0.0,
+        role TEXT DEFAULT 'customer',
+        joined_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
-    # SETTINGS (key-value store for admin config)
+    # TRANSACTIONS (OxaPay)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        track_id TEXT UNIQUE NOT NULL,
+        amount REAL NOT NULL,
+        status TEXT DEFAULT 'pending',
+        credited INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        paid_at TEXT DEFAULT NULL
+    )
+    """)
+
+    # REVIEWS
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        vendor_id INTEGER NOT NULL,
+        customer_id INTEGER NOT NULL,
+        stars INTEGER CHECK(stars BETWEEN 1 AND 5),
+        text TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders(id),
+        FOREIGN KEY (product_id) REFERENCES products(id),
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+    )
+    """)
+
+    # TICKETS
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        customer_id INTEGER NOT NULL,
+        vendor_id INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        status TEXT DEFAULT 'open',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders(id)
+    )
+    """)
+
+    # TICKET MESSAGES
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ticket_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id INTEGER NOT NULL,
+        sender_id INTEGER NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+    )
+    """)
+
+    # WITHDRAWALS
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS withdrawals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+    )
+    """)
+
+    # COURIER ORDERS
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS courier_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        customer_id INTEGER NOT NULL,
+        vendor_id INTEGER NOT NULL,
+        delivery_address TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders(id)
+    )
+    """)
+
+    # SETTINGS
     cur.execute("""
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -100,15 +211,6 @@ def init_db():
         file_id TEXT,
         caption TEXT DEFAULT '',
         sent_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # USERS (track bot users for broadcasts)
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        telegram_id INTEGER PRIMARY KEY,
-        username TEXT DEFAULT '',
-        joined_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
